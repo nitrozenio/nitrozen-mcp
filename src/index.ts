@@ -323,16 +323,44 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
 
 const mcpHandler = NitrozenMcpAgent.serve("/mcp", { binding: "NitrozenMcpAgent" });
 
+const OAUTH_METADATA = {
+  issuer: "https://nitrozen.io",
+  authorization_endpoint: "https://nitrozen.io/oauth/authorize",
+  token_endpoint: "https://nitrozen.io/oauth/token",
+  response_types_supported: ["code"],
+  grant_types_supported: ["authorization_code", "refresh_token"],
+  code_challenge_methods_supported: ["S256"],
+  token_endpoint_auth_methods_supported: ["none"],
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const token = url.searchParams.get("token");
+
+    // OAuth 2.0 Authorization Server Metadata (RFC 8414)
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      return Response.json(OAUTH_METADATA, {
+        headers: { "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    // Extract Bearer token from Authorization header
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
     if (!token) {
       return new Response(
-        JSON.stringify({ error: "Missing required query parameter: token" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ error: "unauthorized", error_description: "Bearer token required" }),
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": `Bearer realm="Nitrozen MCP", error="unauthorized"`,
+          },
+        }
       );
     }
+
     (ctx as any).props = { token } satisfies Props;
     return mcpHandler.fetch(request, env, ctx);
   },
