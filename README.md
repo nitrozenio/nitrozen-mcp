@@ -23,6 +23,10 @@ Remote MCP server for the [Nitrozen.io](https://nitrozen.io) changelog API, host
 | `revoke_token` | Revoke an API token |
 | `get_public_entries` | List published entries by project slug (no auth) |
 
+## Authentication
+
+Each user passes their own Nitrozen.io API token as a query parameter. Create a token on the [API Tokens](https://app.nitrozen.io/api-tokens) page.
+
 ## Setup
 
 ```bash
@@ -35,28 +39,16 @@ npm install
 npm run dev
 ```
 
-Set the `NITROZEN_API_TOKEN` environment variable in a `.dev.vars` file:
-
-```
-NITROZEN_API_TOKEN=your_api_token_here
-```
-
 ## Deploy
 
 ```bash
 npm run deploy
 ```
 
-Then set the production secret:
-
-```bash
-wrangler secret put NITROZEN_API_TOKEN
-```
-
 ## Connect to Claude
 
-Once deployed, add the MCP server in Claude's settings:
+Once deployed, add the MCP server in Claude's settings using your API token:
 
 ```
-https://nitrozen-mcp.<your-subdomain>.workers.dev/mcp
+https://mcp.nitrozen.io/mcp?token=YOUR_API_TOKEN
 ```

@@ -6,17 +6,21 @@ const API_BASE = "https://nitrozen.io/api/v1";
 
 interface Env {
   NitrozenMcpAgent: DurableObjectNamespace;
-  NITROZEN_API_TOKEN: string;
 }
 
-export class NitrozenMcpAgent extends McpAgent<Env> {
+type Props = {
+  token: string;
+  [key: string]: unknown;
+};
+
+export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
   server = new McpServer({
     name: "nitrozen",
     version: "1.0.0",
   });
 
   async init() {
-    const token = () => this.env.NITROZEN_API_TOKEN;
+    const token = () => this.props!.token;
 
     const api = async (
       method: string,
@@ -317,4 +321,19 @@ export class NitrozenMcpAgent extends McpAgent<Env> {
   }
 }
 
-export default NitrozenMcpAgent.serve("/mcp", { binding: "NitrozenMcpAgent" });
+const mcpHandler = NitrozenMcpAgent.serve("/mcp", { binding: "NitrozenMcpAgent" });
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const token = url.searchParams.get("token");
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: "Missing required query parameter: token" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    (ctx as any).props = { token } satisfies Props;
+    return mcpHandler.fetch(request, env, ctx);
+  },
+};
