@@ -1,0 +1,22 @@
+{
+  "name": "nitrozen-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-28",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NitrozenMcpAgent",
+        "class_name": "NitrozenMcpAgent"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["NitrozenMcpAgent"]
+    }
+  ]
+}
