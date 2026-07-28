@@ -183,8 +183,12 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
           title: z.string().max(255).describe("Entry title"),
           content: z.string().describe("Entry content (Markdown)"),
           category: z
-            .enum(["new", "improvement", "fix", "announcement"])
-            .describe("Entry category"),
+            .string()
+            .describe(
+              "Entry category slug. Every project has the built-in categories 'new', " +
+                "'improvement', 'fix', and 'announcement'; projects with custom categories " +
+                "enabled may also have additional project-specific slugs."
+            ),
           is_published: z.boolean().optional().describe("Publish immediately (default: false)"),
           published_at: z
             .string()
@@ -226,9 +230,13 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
           title: z.string().max(255).optional().describe("New title"),
           content: z.string().optional().describe("New content (Markdown)"),
           category: z
-            .enum(["new", "improvement", "fix", "announcement"])
+            .string()
             .optional()
-            .describe("New category"),
+            .describe(
+              "New category slug. Every project has the built-in categories 'new', " +
+                "'improvement', 'fix', and 'announcement'; projects with custom categories " +
+                "enabled may also have additional project-specific slugs."
+            ),
           is_published: z.boolean().optional().describe("Publish or unpublish the entry"),
           published_at: z.string().nullable().optional().describe("ISO 8601 publish date"),
         },
@@ -293,7 +301,7 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
       {
         description: "Permanently revoke an API token by ID.",
         inputSchema: {
-          token_id: z.number().int().describe("Token ID to revoke"),
+          token_id: z.string().describe("Token ID to revoke (from list_tokens)"),
         },
       },
       async ({ token_id }) => {
