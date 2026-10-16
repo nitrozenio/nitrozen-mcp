@@ -4,6 +4,8 @@ import { z } from "zod";
 
 const API_BASE = "https://nitrozen.io/api/v1";
 
+const SERVER_INFO = { name: "nitrozen", version: "1.0.0" };
+
 interface Env {
   NitrozenMcpAgent: DurableObjectNamespace;
 }
@@ -14,10 +16,7 @@ type Props = {
 };
 
 export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
-  server = new McpServer({
-    name: "nitrozen",
-    version: "1.0.0",
-  });
+  server = new McpServer(SERVER_INFO);
 
   async init() {
     const token = () => this.props!.token;
@@ -331,6 +330,40 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
 
 const mcpHandler = NitrozenMcpAgent.serve("/mcp", { binding: "NitrozenMcpAgent" });
 
+/**
+ * Static MCP server card (served unauthenticated at
+ * /.well-known/mcp/server-card.json) so directories such as Smithery can
+ * discover the server's tools without a token. Built by running init()
+ * against a recorder, so it always matches the registered tools.
+ */
+let serverCardCache: unknown;
+export async function buildServerCard() {
+  if (serverCardCache) return serverCardCache;
+  const tools: { name: string; description?: string; inputSchema: unknown }[] = [];
+  const recorder = {
+    server: {
+      registerTool(name: string, config: { description?: string; inputSchema?: z.ZodRawShape }) {
+        const schema = z.toJSONSchema(z.object(config.inputSchema ?? {}));
+        delete (schema as Record<string, unknown>)["$schema"];
+        tools.push({ name, description: config.description, inputSchema: schema });
+      },
+    },
+    props: { token: "" },
+  };
+  await NitrozenMcpAgent.prototype.init.call(recorder as unknown as NitrozenMcpAgent);
+  serverCardCache = {
+    serverInfo: SERVER_INFO,
+    description: "Remote MCP server for the Nitrozen.io changelog API: manage projects, entries and API tokens.",
+    homepage: "https://nitrozen.io/docs/mcp",
+    transport: { type: "streamable-http", url: "https://mcp.nitrozen.io/mcp" },
+    authentication: { required: true, schemes: ["oauth2", "bearer"] },
+    tools,
+    resources: [],
+    prompts: [],
+  };
+  return serverCardCache;
+}
+
 const OAUTH_METADATA = {
   issuer: "https://nitrozen.io",
   authorization_endpoint: "https://nitrozen.io/oauth/authorize",
@@ -349,6 +382,15 @@ export default {
     if (url.pathname === "/.well-known/oauth-authorization-server") {
       return Response.json(OAUTH_METADATA, {
         headers: { "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    if (url.pathname === "/.well-known/mcp/server-card.json") {
+      return Response.json(await buildServerCard(), {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        },
       });
     }
 
