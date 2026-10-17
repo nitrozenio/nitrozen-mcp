@@ -52,3 +52,12 @@ Once deployed, add the MCP server in Claude's settings using your API token:
 ```
 https://mcp.nitrozen.io/mcp?token=YOUR_API_TOKEN
 ```
+
+## Docker (stdio)
+
+For MCP clients that only speak stdio, the included `Dockerfile` bridges to the hosted server with `mcp-remote`:
+
+```bash
+docker build -t nitrozen-mcp .
+docker run -i --rm -e NITROZEN_API_TOKEN=YOUR_API_TOKEN nitrozen-mcp
+```
