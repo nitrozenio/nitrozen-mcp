@@ -25,7 +25,7 @@ Remote MCP server for the [Nitrozen.io](https://nitrozen.io) changelog API, host
 
 ## Authentication
 
-Each user passes their own Nitrozen.io API token as a query parameter. Create a token on the [API Tokens](https://app.nitrozen.io/api-tokens) page.
+OAuth-capable MCP clients sign in through nitrozen.io automatically (discovery via `/.well-known/oauth-protected-resource`). Other clients send a Nitrozen.io API token as `Authorization: Bearer YOUR_API_TOKEN`. Create a token on the [API Tokens](https://nitrozen.io/api-tokens) page.
 
 ## Setup
 
@@ -47,8 +47,12 @@ npm run deploy
 
 ## Connect to Claude
 
-Once deployed, add the MCP server in Claude's settings using your API token:
+Add the remote MCP server URL in your client's settings and sign in when prompted:
 
 ```
-https://mcp.nitrozen.io/mcp?token=YOUR_API_TOKEN
+https://mcp.nitrozen.io/mcp
 ```
+
+## Registry listing
+
+`server.json` describes this server for the official MCP Registry (registry.modelcontextprotocol.io) under the DNS-verified namespace `io.nitrozen`. Publish steps: see PUBLISHING.md.

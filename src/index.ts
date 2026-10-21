@@ -374,6 +374,13 @@ const OAUTH_METADATA = {
   token_endpoint_auth_methods_supported: ["none"],
 };
 
+const PROTECTED_RESOURCE_METADATA = {
+  resource: "https://mcp.nitrozen.io/mcp",
+  authorization_servers: ["https://nitrozen.io"],
+  bearer_methods_supported: ["header"],
+  resource_documentation: "https://nitrozen.io/docs/mcp",
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -381,6 +388,14 @@ export default {
     // OAuth 2.0 Authorization Server Metadata (RFC 8414)
     if (url.pathname === "/.well-known/oauth-authorization-server") {
       return Response.json(OAUTH_METADATA, {
+        headers: { "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    // OAuth 2.0 Protected Resource Metadata (RFC 9728), used by MCP clients and
+    // Smithery to discover the authorization server for this resource.
+    if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+      return Response.json(PROTECTED_RESOURCE_METADATA, {
         headers: { "Access-Control-Allow-Origin": "*" },
       });
     }
@@ -405,7 +420,7 @@ export default {
           status: 401,
           headers: {
             "Content-Type": "application/json",
-            "WWW-Authenticate": `Bearer realm="Nitrozen MCP", error="unauthorized"`,
+            "WWW-Authenticate": `Bearer realm="Nitrozen MCP", error="unauthorized", resource_metadata="https://mcp.nitrozen.io/.well-known/oauth-protected-resource"`,
           },
         }
       );
