@@ -81,7 +81,7 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "list_projects",
       {
-        description: "List all changelog projects owned by the authenticated user.",
+        description: "List all changelog projects owned by the authenticated user. Each project includes public_url, the address of its public changelog page (verified custom domain, or https://nitrozen.io/c/<slug>).",
         inputSchema: {},
       },
       async () => {
@@ -108,7 +108,7 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_project",
       {
-        description: "Get a single changelog project by ID.",
+        description: "Get a single changelog project by ID, including public_url (the public changelog page address).",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
         },

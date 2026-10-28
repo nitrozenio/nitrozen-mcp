@@ -8,9 +8,9 @@ Remote MCP server for the [Nitrozen.io](https://nitrozen.io) changelog API, host
 |------|-------------|
 | `get_user` | Get authenticated user profile and plan |
 | `get_usage` | Get usage statistics and plan limits |
-| `list_projects` | List all changelog projects |
+| `list_projects` | List all changelog projects (each includes `public_url`) |
 | `create_project` | Create a new project |
-| `get_project` | Get a project by ID |
+| `get_project` | Get a project by ID, including its `public_url` |
 | `update_project` | Update project name/description |
 | `delete_project` | Delete a project |
 | `list_entries` | List entries for a project (paginated) |
