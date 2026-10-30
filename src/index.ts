@@ -338,6 +338,7 @@ const OAUTH_METADATA = {
   response_types_supported: ["code"],
   grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
+  scopes_supported: ["read", "write", "tokens"],
   token_endpoint_auth_methods_supported: ["none"],
 };
 
@@ -349,6 +350,7 @@ const PROTECTED_RESOURCE_METADATA = {
   resource: MCP_RESOURCE,
   resource_name: "Nitrozen MCP server",
   authorization_servers: ["https://nitrozen.io"],
+  scopes_supported: ["read", "write", "tokens"],
   bearer_methods_supported: ["header"],
   resource_documentation: "https://nitrozen.io/docs/mcp",
 };
