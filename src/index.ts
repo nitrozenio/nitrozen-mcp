@@ -340,6 +340,12 @@ const OAUTH_METADATA = {
   code_challenge_methods_supported: ["S256"],
   scopes_supported: ["read", "write", "tokens"],
   token_endpoint_auth_methods_supported: ["none"],
+  registration_endpoint: "https://nitrozen.io/oauth/register",
+  service_documentation: "https://nitrozen.io/auth.md",
+  agent_auth: {
+    register_uri: "https://nitrozen.io/oauth/register",
+    documentation: "https://nitrozen.io/auth.md",
+  },
 };
 
 const MCP_RESOURCE = "https://mcp.nitrozen.io/mcp";
