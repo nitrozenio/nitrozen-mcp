@@ -1,6 +1,13 @@
-# nitrozen-mcp
+<p align="center"><img src="logo.png" width="96" alt="Nitrozen logo"></p>
 
-Remote MCP server for the [Nitrozen.io](https://nitrozen.io) changelog API, hosted on Cloudflare Workers.
+# Nitrozen MCP Server
+
+Official remote [Model Context Protocol](https://modelcontextprotocol.io) server for [Nitrozen.io](https://nitrozen.io), the hosted changelog platform. Let your AI assistant create projects, write and publish changelog entries, and read your public changelog.
+
+- **Endpoint:** `https://mcp.nitrozen.io/mcp` (Streamable HTTP, hosted on Cloudflare Workers)
+- **Docs:** https://nitrozen.io/docs/mcp
+
+Nothing to install: it is a hosted server. This repository holds the Worker source.
 
 ## Tools
 
@@ -25,39 +32,76 @@ Remote MCP server for the [Nitrozen.io](https://nitrozen.io) changelog API, host
 
 ## Authentication
 
-Each user passes their own Nitrozen.io API token as a query parameter. Create a token on the [API Tokens](https://app.nitrozen.io/api-tokens) page.
+- **Claude.ai** uses OAuth 2.0: add the server URL and authorize in the browser. No token needed.
+- **All other clients** send an API token in a header: `Authorization: Bearer <your-api-token>`. Create a token on the [API Tokens](https://app.nitrozen.io/api-tokens) page (choose the `read` scope for read-only access).
 
-## Setup
+Requests without a valid token get `401` with a `WWW-Authenticate` header pointing to `https://mcp.nitrozen.io/.well-known/oauth-protected-resource`.
+
+## Connect your client
+
+### Claude.ai
+Settings → Connectors (Integrations) → Add custom connector → `https://mcp.nitrozen.io/mcp`, then sign in to Nitrozen and approve.
+
+### Claude Code
+```bash
+claude mcp add --transport http nitrozen https://mcp.nitrozen.io/mcp \
+  --header "Authorization: Bearer <your-api-token>"
+```
+
+### Cursor (`~/.cursor/mcp.json`) / Windsurf / other JSON configs
+```json
+{
+  "mcpServers": {
+    "nitrozen": {
+      "url": "https://mcp.nitrozen.io/mcp",
+      "headers": { "Authorization": "Bearer <your-api-token>" }
+    }
+  }
+}
+```
+
+### Cline (`cline_mcp_settings.json`)
+```json
+{
+  "mcpServers": {
+    "nitrozen": {
+      "type": "streamableHttp",
+      "url": "https://mcp.nitrozen.io/mcp",
+      "headers": { "Authorization": "Bearer <your-api-token>" },
+      "disabled": false
+    }
+  }
+}
+```
+
+### VS Code (`.vscode/mcp.json`)
+```json
+{
+  "servers": {
+    "nitrozen": {
+      "type": "http",
+      "url": "https://mcp.nitrozen.io/mcp",
+      "headers": { "Authorization": "Bearer <your-api-token>" }
+    }
+  }
+}
+```
+
+### Docker (stdio bridge)
+For stdio-only clients, the included `Dockerfile` bridges to the hosted server with `mcp-remote`:
+```bash
+docker build -t nitrozen-mcp .
+docker run -i --rm -e NITROZEN_API_TOKEN=<your-api-token> nitrozen-mcp
+```
+
+## Development
 
 ```bash
 npm install
+npm run dev      # local Worker
+npm run deploy   # deploy to Cloudflare
 ```
 
-## Local Development
+## License
 
-```bash
-npm run dev
-```
-
-## Deploy
-
-```bash
-npm run deploy
-```
-
-## Connect to Claude
-
-Once deployed, add the MCP server in Claude's settings using your API token:
-
-```
-https://mcp.nitrozen.io/mcp?token=YOUR_API_TOKEN
-```
-
-## Docker (stdio)
-
-For MCP clients that only speak stdio, the included `Dockerfile` bridges to the hosted server with `mcp-remote`:
-
-```bash
-docker build -t nitrozen-mcp .
-docker run -i --rm -e NITROZEN_API_TOKEN=YOUR_API_TOKEN nitrozen-mcp
-```
+See [LICENSE](LICENSE).
