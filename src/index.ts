@@ -341,11 +341,77 @@ const OAUTH_METADATA = {
   token_endpoint_auth_methods_supported: ["none"],
 };
 
+const MCP_RESOURCE = "https://mcp.nitrozen.io/mcp";
+const RESOURCE_METADATA_URL = "https://mcp.nitrozen.io/.well-known/oauth-protected-resource";
+
+// OAuth 2.0 Protected Resource Metadata (RFC 9728) for this MCP server
+const PROTECTED_RESOURCE_METADATA = {
+  resource: MCP_RESOURCE,
+  resource_name: "Nitrozen MCP server",
+  authorization_servers: ["https://nitrozen.io"],
+  bearer_methods_supported: ["header"],
+  resource_documentation: "https://nitrozen.io/docs/mcp",
+};
+
+const TOKEN_CACHE_TTL_SECONDS = 60;
+
+function unauthorized(error: "invalid_request" | "invalid_token", description: string): Response {
+  const challenge =
+    error === "invalid_request"
+      ? `Bearer realm="Nitrozen MCP", resource_metadata="${RESOURCE_METADATA_URL}"`
+      : `Bearer realm="Nitrozen MCP", error="invalid_token", error_description="${description}", resource_metadata="${RESOURCE_METADATA_URL}"`;
+  return new Response(JSON.stringify({ error: error === "invalid_request" ? "unauthorized" : "invalid_token", error_description: description }), {
+    status: 401,
+    headers: {
+      "Content-Type": "application/json",
+      "WWW-Authenticate": challenge,
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "WWW-Authenticate",
+    },
+  });
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Check a bearer token (OAuth access token or API token) against the Nitrozen API.
+ * Results are cached for ~60s per token hash (the token itself is never used as a cache key).
+ * Returns the upstream status: 200 valid, 401 invalid/expired/revoked, 403 no API access on plan.
+ */
+async function validateToken(token: string, ctx: ExecutionContext): Promise<number> {
+  const cache = (caches as unknown as { default: Cache }).default;
+  const key = new Request(`https://token-cache.mcp.nitrozen.io/${await sha256Hex(token)}`);
+  const hit = await cache.match(key);
+  if (hit) return Number(await hit.text());
+
+  const res = await fetch(`${API_BASE}/user`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+  });
+  const status = res.status;
+  if (status === 200 || status === 401 || status === 403) {
+    ctx.waitUntil(
+      cache.put(key, new Response(String(status), { headers: { "Cache-Control": `max-age=${TOKEN_CACHE_TTL_SECONDS}` } }))
+    );
+  }
+  return status;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // OAuth 2.0 Authorization Server Metadata (RFC 8414)
+    // OAuth 2.0 Protected Resource Metadata (RFC 9728), root and path-suffixed forms
+    if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+      return Response.json(PROTECTED_RESOURCE_METADATA, {
+        headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+      });
+    }
+
+    // OAuth 2.0 Authorization Server Metadata (RFC 8414). Kept for older MCP clients
+    // (including existing Claude.ai connections) that look for it on the MCP host.
     if (url.pathname === "/.well-known/oauth-authorization-server") {
       return Response.json(OAUTH_METADATA, {
         headers: { "Access-Control-Allow-Origin": "*" },
@@ -354,19 +420,32 @@ export default {
 
     // Extract Bearer token from Authorization header
     const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
 
     if (!token) {
-      return new Response(
-        JSON.stringify({ error: "unauthorized", error_description: "Bearer token required" }),
-        {
-          status: 401,
-          headers: {
-            "Content-Type": "application/json",
-            "WWW-Authenticate": `Bearer realm="Nitrozen MCP", error="unauthorized"`,
-          },
-        }
-      );
+      return unauthorized("invalid_request", "Bearer token required");
+    }
+
+    let status: number;
+    try {
+      status = await validateToken(token, ctx);
+    } catch {
+      status = 0;
+    }
+    if (status === 401) {
+      return unauthorized("invalid_token", "The access token is invalid, expired or revoked");
+    }
+    if (status === 403) {
+      return new Response(JSON.stringify({ error: "insufficient_access", error_description: "Your Nitrozen plan does not include API access" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    if (status !== 200) {
+      return new Response(JSON.stringify({ error: "temporarily_unavailable", error_description: "Could not validate the token, try again" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "5" },
+      });
     }
 
     (ctx as any).props = { token } satisfies Props;
