@@ -345,6 +345,7 @@ const OAUTH_METADATA = {
   agent_auth: {
     register_uri: "https://nitrozen.io/oauth/register",
     documentation: "https://nitrozen.io/auth.md",
+    skill: "https://nitrozen.io/auth.md",
   },
 };
 
