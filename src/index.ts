@@ -363,23 +363,61 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
 
 const mcpHandler = NitrozenMcpAgent.serve("/mcp", { binding: "NitrozenMcpAgent" });
 
+const MCP_ORIGIN = "https://mcp.nitrozen.io";
+const UPSTREAM_ORIGIN = "https://nitrozen.io";
+
+// OAuth 2.0 Authorization Server Metadata (RFC 8414). mcp.nitrozen.io acts as its own
+// authorization server origin; its /oauth/* endpoints forward to nitrozen.io, which issues
+// the tokens (so tokens keep validating against the Nitrozen API).
 const OAUTH_METADATA = {
-  issuer: "https://nitrozen.io",
-  authorization_endpoint: "https://nitrozen.io/oauth/authorize",
-  token_endpoint: "https://nitrozen.io/oauth/token",
+  issuer: MCP_ORIGIN,
+  authorization_endpoint: `${MCP_ORIGIN}/oauth/authorize`,
+  token_endpoint: `${MCP_ORIGIN}/oauth/token`,
+  registration_endpoint: `${MCP_ORIGIN}/oauth/register`,
   response_types_supported: ["code"],
   grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   scopes_supported: ["read", "write", "tokens"],
   token_endpoint_auth_methods_supported: ["none"],
-  registration_endpoint: "https://nitrozen.io/oauth/register",
   service_documentation: "https://nitrozen.io/auth.md",
   agent_auth: {
-    register_uri: "https://nitrozen.io/oauth/register",
+    register_uri: `${MCP_ORIGIN}/oauth/register`,
     documentation: "https://nitrozen.io/auth.md",
     skill: "https://nitrozen.io/auth.md",
   },
 };
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version",
+  "Access-Control-Expose-Headers": "WWW-Authenticate, Mcp-Session-Id",
+};
+
+/** Server-side pass-through of /oauth/token and /oauth/register to nitrozen.io. */
+async function proxyOAuth(request: Request, path: string): Promise<Response> {
+  const headers = new Headers();
+  for (const h of ["content-type", "accept", "authorization"]) {
+    const v = request.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  if (!headers.has("accept")) headers.set("accept", "application/json");
+  const ip = request.headers.get("cf-connecting-ip");
+  if (ip) headers.set("x-forwarded-for", ip);
+  const upstream = await fetch(`${UPSTREAM_ORIGIN}${path}`, {
+    method: "POST",
+    headers,
+    body: await request.arrayBuffer(),
+    redirect: "manual",
+  });
+  const out = new Headers();
+  for (const h of ["content-type", "cache-control", "pragma", "www-authenticate", "retry-after", "x-ratelimit-limit", "x-ratelimit-remaining"]) {
+    const v = upstream.headers.get(h);
+    if (v) out.set(h, v);
+  }
+  for (const [k, v] of Object.entries(CORS_HEADERS)) out.set(k, v);
+  return new Response(upstream.body, { status: upstream.status, headers: out });
+}
 
 const MCP_RESOURCE = "https://mcp.nitrozen.io/mcp";
 const RESOURCE_METADATA_URL = "https://mcp.nitrozen.io/.well-known/oauth-protected-resource/mcp";
@@ -388,7 +426,7 @@ const RESOURCE_METADATA_URL = "https://mcp.nitrozen.io/.well-known/oauth-protect
 const PROTECTED_RESOURCE_METADATA = {
   resource: MCP_RESOURCE,
   resource_name: "Nitrozen MCP server",
-  authorization_servers: ["https://nitrozen.io"],
+  authorization_servers: ["https://mcp.nitrozen.io"],
   scopes_supported: ["read", "write", "tokens"],
   bearer_methods_supported: ["header"],
   resource_documentation: "https://nitrozen.io/docs/mcp",
@@ -465,12 +503,35 @@ export default {
       });
     }
 
-    // OAuth 2.0 Authorization Server Metadata (RFC 8414). Kept for older MCP clients
-    // (including existing Claude.ai connections) that look for it on the MCP host.
-    if (url.pathname === "/.well-known/oauth-authorization-server") {
+    // OAuth 2.0 Authorization Server Metadata (RFC 8414), root and path-suffixed forms
+    if (url.pathname === "/.well-known/oauth-authorization-server" || url.pathname === "/.well-known/oauth-authorization-server/mcp") {
       return Response.json(OAUTH_METADATA, {
+        headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+      });
+    }
+
+    // No OpenID Connect provider here: answer with a clean JSON 404
+    if (url.pathname.startsWith("/.well-known/openid-configuration") || url.pathname.endsWith("/.well-known/openid-configuration")) {
+      return Response.json({ error: "not_found", error_description: "OpenID Connect discovery is not supported; use /.well-known/oauth-authorization-server" }, {
+        status: 404,
         headers: { "Access-Control-Allow-Origin": "*" },
       });
+    }
+
+    // Authorization endpoint: redirect to nitrozen.io, preserving the query string
+    if (url.pathname === "/oauth/authorize") {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `${UPSTREAM_ORIGIN}/oauth/authorize${url.search}`, "Cache-Control": "no-store" },
+      });
+    }
+
+    // Token and dynamic client registration endpoints: server-side pass-through
+    if (url.pathname === "/oauth/token" || url.pathname === "/oauth/register") {
+      if (request.method !== "POST") {
+        return Response.json({ error: "invalid_request", error_description: "Use POST" }, { status: 405, headers: { ...CORS_HEADERS, Allow: "POST, OPTIONS" } });
+      }
+      return proxyOAuth(request, url.pathname);
     }
 
     // Extract Bearer token from Authorization header
