@@ -382,7 +382,7 @@ const OAUTH_METADATA = {
 };
 
 const MCP_RESOURCE = "https://mcp.nitrozen.io/mcp";
-const RESOURCE_METADATA_URL = "https://mcp.nitrozen.io/.well-known/oauth-protected-resource";
+const RESOURCE_METADATA_URL = "https://mcp.nitrozen.io/.well-known/oauth-protected-resource/mcp";
 
 // OAuth 2.0 Protected Resource Metadata (RFC 9728) for this MCP server
 const PROTECTED_RESOURCE_METADATA = {
@@ -443,6 +443,20 @@ async function validateToken(token: string, ctx: ExecutionContext): Promise<numb
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // CORS preflight: answer before auth so browser-based MCP clients can connect
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version",
+          "Access-Control-Expose-Headers": "WWW-Authenticate, Mcp-Session-Id",
+          "Access-Control-Max-Age": "86400",
+        },
+      });
+    }
 
     // OAuth 2.0 Protected Resource Metadata (RFC 9728), root and path-suffixed forms
     if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
