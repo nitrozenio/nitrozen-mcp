@@ -6,6 +6,8 @@ const API_BASE = "https://nitrozen.io/api/v1";
 
 interface Env {
   NitrozenMcpAgent: DurableObjectNamespace;
+  /** HMAC key for the wrapped OAuth state (Worker secret) */
+  OAUTH_STATE_SECRET: string;
 }
 
 type Props = {
@@ -378,7 +380,8 @@ const OAUTH_METADATA = {
   grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   scopes_supported: ["read", "write", "tokens"],
-  token_endpoint_auth_methods_supported: ["none"],
+  token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
+  authorization_response_iss_parameter_supported: true,
   service_documentation: "https://nitrozen.io/auth.md",
   agent_auth: {
     register_uri: `${MCP_ORIGIN}/oauth/register`,
@@ -394,6 +397,144 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Expose-Headers": "WWW-Authenticate, Mcp-Session-Id",
 };
 
+const OAUTH_CALLBACK = "https://mcp.nitrozen.io/oauth/callback";
+const STATE_TTL_SECONDS = 1800;
+
+function b64url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(s: string): Uint8Array {
+  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+async function hmacKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+type WrappedState = { r: string; s: string | null; c: string; e: number };
+async function wrapState(secret: string, st: WrappedState): Promise<string> {
+  const payload = b64url(new TextEncoder().encode(JSON.stringify(st)));
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(secret), new TextEncoder().encode(payload)));
+  return `${payload}.${b64url(sig)}`;
+}
+async function unwrapState(secret: string, w: string | null): Promise<WrappedState | null> {
+  if (!w) return null;
+  const [payload, sig] = w.split(".");
+  if (!payload || !sig) return null;
+  try {
+    const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), b64urlDecode(sig), new TextEncoder().encode(payload));
+    if (!ok) return null;
+    const st = JSON.parse(new TextDecoder().decode(b64urlDecode(payload))) as WrappedState;
+    if (typeof st.r !== "string" || typeof st.e !== "number" || st.e < Math.floor(Date.now() / 1000)) return null;
+    return st;
+  } catch {
+    return null;
+  }
+}
+
+/** Redirect to the client's own redirect_uri with the given params plus iss (RFC 9207). */
+function redirectToClient(redirectUri: string, params: URLSearchParams): Response {
+  const target = new URL(redirectUri);
+  for (const [k, v] of params) target.searchParams.set(k, v);
+  target.searchParams.set("iss", MCP_ORIGIN);
+  return new Response(null, { status: 302, headers: { Location: target.toString(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+function oauthErrorPage(status: number, message: string): Response {
+  return new Response(`<!doctype html><meta charset="utf-8"><title>Nitrozen sign-in error</title><p style="font-family:system-ui;max-width:32rem;margin:15vh auto">${message}</p>`, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+/**
+ * /oauth/authorize: check the request with nitrozen.io (client and redirect_uri), then send the
+ * user to nitrozen.io with redirect_uri set to our callback and the original redirect_uri/state
+ * wrapped in a signed state, so the response can carry iss=https://mcp.nitrozen.io.
+ */
+async function handleAuthorize(url: URL, env: Env): Promise<Response> {
+  const q = url.searchParams;
+  const redirectUri = q.get("redirect_uri");
+  const clientId = q.get("client_id");
+  if (!redirectUri || !clientId || !env.OAUTH_STATE_SECRET) {
+    return new Response(null, { status: 302, headers: { Location: `${UPSTREAM_ORIGIN}/oauth/authorize${url.search}`, "Cache-Control": "no-store" } });
+  }
+  // Validate client_id + redirect_uri (and other params) against nitrozen.io without a session
+  const probe = await fetch(`${UPSTREAM_ORIGIN}/oauth/authorize${url.search}`, { redirect: "manual", headers: { Accept: "text/html" } });
+  const loc = probe.headers.get("location") ?? "";
+  if (probe.status >= 300 && probe.status < 400 && loc && !loc.startsWith(`${UPSTREAM_ORIGIN}/`)) {
+    // Validation error redirected back to the client's own redirect_uri: forward it with iss
+    try {
+      const errUrl = new URL(loc);
+      const base = new URL(redirectUri);
+      if (errUrl.origin + errUrl.pathname === base.origin + base.pathname) {
+        return redirectToClient(redirectUri, errUrl.searchParams);
+      }
+    } catch { /* fall through */ }
+    return oauthErrorPage(400, "This sign-in request was rejected.");
+  }
+  if (!(probe.status >= 300 && probe.status < 400)) {
+    // Invalid client or redirect_uri: do not redirect anywhere
+    const text = await probe.text();
+    return new Response(text, { status: probe.status, headers: { "Content-Type": probe.headers.get("content-type") ?? "application/json", "Cache-Control": "no-store" } });
+  }
+  const wrapped = await wrapState(env.OAUTH_STATE_SECRET, {
+    r: redirectUri,
+    s: q.get("state"),
+    c: clientId,
+    e: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS,
+  });
+  const upstream = new URL(`${UPSTREAM_ORIGIN}/oauth/authorize`);
+  for (const [k, v] of q) upstream.searchParams.set(k, v);
+  upstream.searchParams.set("redirect_uri", OAUTH_CALLBACK);
+  upstream.searchParams.set("state", wrapped);
+  return new Response(null, { status: 302, headers: { Location: upstream.toString(), "Cache-Control": "no-store" } });
+}
+
+/** /oauth/callback: unwrap the state and send code (or error), the original state and iss to the client. */
+async function handleCallback(url: URL, env: Env): Promise<Response> {
+  const st = await unwrapState(env.OAUTH_STATE_SECRET, url.searchParams.get("state"));
+  if (!st) return oauthErrorPage(400, "This sign-in link is invalid or has expired. Please start the connection again from your app.");
+  const params = new URLSearchParams();
+  for (const [k, v] of url.searchParams) {
+    if (k !== "state" && k !== "iss") params.set(k, v);
+  }
+  if (st.s !== null) params.set("state", st.s);
+  return redirectToClient(st.r, params);
+}
+
+/** Rewrite request bodies for the pass-through: token redirect_uri and DCR redirect_uris. */
+async function rewriteOAuthBody(path: string, contentType: string, raw: ArrayBuffer): Promise<ArrayBuffer> {
+  const text = new TextDecoder().decode(raw);
+  const isJson = contentType.includes("application/json");
+  if (path === "/oauth/token") {
+    if (isJson) {
+      try {
+        const d = JSON.parse(text) as Record<string, unknown>;
+        if (d.grant_type === "authorization_code" && d.redirect_uri) d.redirect_uri = OAUTH_CALLBACK;
+        return new TextEncoder().encode(JSON.stringify(d)).buffer as ArrayBuffer;
+      } catch { return raw; }
+    }
+    const f = new URLSearchParams(text);
+    if (f.get("grant_type") === "authorization_code" && f.has("redirect_uri")) {
+      f.set("redirect_uri", OAUTH_CALLBACK);
+      return new TextEncoder().encode(f.toString()).buffer as ArrayBuffer;
+    }
+    return raw;
+  }
+  if (path === "/oauth/register" && isJson) {
+    try {
+      const d = JSON.parse(text) as Record<string, unknown>;
+      if (Array.isArray(d.redirect_uris) && d.redirect_uris.length < 5 && !d.redirect_uris.includes(OAUTH_CALLBACK)) {
+        d.redirect_uris = [...d.redirect_uris, OAUTH_CALLBACK];
+      }
+      return new TextEncoder().encode(JSON.stringify(d)).buffer as ArrayBuffer;
+    } catch { return raw; }
+  }
+  return raw;
+}
+
 /** Server-side pass-through of /oauth/token and /oauth/register to nitrozen.io. */
 async function proxyOAuth(request: Request, path: string): Promise<Response> {
   const headers = new Headers();
@@ -404,7 +545,7 @@ async function proxyOAuth(request: Request, path: string): Promise<Response> {
   if (!headers.has("accept")) headers.set("accept", "application/json");
   const ip = request.headers.get("cf-connecting-ip");
   if (ip) headers.set("x-forwarded-for", ip);
-  const body = await request.arrayBuffer();
+  const body = await rewriteOAuthBody(path, request.headers.get("content-type") ?? "", await request.arrayBuffer());
   const upstream = await fetch(`${UPSTREAM_ORIGIN}${path}`, {
     method: "POST",
     headers,
@@ -418,6 +559,12 @@ async function proxyOAuth(request: Request, path: string): Promise<Response> {
   }
   for (const [k, v] of Object.entries(CORS_HEADERS)) out.set(k, v);
   if (path === "/oauth/register" && upstream.status === 201) {
+    return finishRegister(upstream, out, body);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: out });
+}
+
+async function finishRegister(upstream: Response, out: Headers, body: ArrayBuffer): Promise<Response> {
     // Echo the granted scope (RFC 7591 section 3.2.1) when nitrozen.io leaves it out
     const text = await upstream.text();
     try {
@@ -428,13 +575,15 @@ async function proxyOAuth(request: Request, path: string): Promise<Response> {
         const allowed = ["read", "write", "tokens"];
         const scopes = requested.split(/\s+/).filter((x) => allowed.includes(x));
         data.scope = scopes.length ? scopes.join(" ") : "read write";
+      }
+      if (data && typeof data === "object") {
+        // Hide the internal callback from the client's view of its registration
+        if (Array.isArray(data.redirect_uris)) data.redirect_uris = data.redirect_uris.filter((u) => u !== OAUTH_CALLBACK);
         out.set("content-type", "application/json");
         return new Response(JSON.stringify(data), { status: 201, headers: out });
       }
     } catch { /* fall through with the original body */ }
     return new Response(text, { status: 201, headers: out });
-  }
-  return new Response(upstream.body, { status: upstream.status, headers: out });
 }
 
 const ICON_SOURCES: Record<string, { src: string; type: string }> = {
@@ -572,10 +721,12 @@ export default {
 
     // Authorization endpoint: redirect to nitrozen.io, preserving the query string
     if (url.pathname === "/oauth/authorize") {
-      return new Response(null, {
-        status: 302,
-        headers: { Location: `${UPSTREAM_ORIGIN}/oauth/authorize${url.search}`, "Cache-Control": "no-store" },
-      });
+      return handleAuthorize(url, env);
+    }
+
+    // Authorization response from nitrozen.io: forward to the client with iss (RFC 9207)
+    if (url.pathname === "/oauth/callback") {
+      return handleCallback(url, env);
     }
 
     // Token and dynamic client registration endpoints: server-side pass-through
