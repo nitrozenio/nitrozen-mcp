@@ -55,6 +55,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_user",
       {
+        title: "Get my profile and plan",
+        annotations: { title: "Get my profile and plan", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "Get the authenticated user's profile and plan details.",
         inputSchema: {},
       },
@@ -67,6 +69,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_usage",
       {
+        title: "Get usage and plan limits",
+        annotations: { title: "Get usage and plan limits", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "Get current usage statistics and plan limits.",
         inputSchema: {},
       },
@@ -81,6 +85,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "list_projects",
       {
+        title: "List changelog projects",
+        annotations: { title: "List changelog projects", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "List all changelog projects owned by the authenticated user. Each project includes public_url, the address of its public changelog page (verified custom domain, or https://nitrozen.io/c/<slug>).",
         inputSchema: {},
       },
@@ -93,6 +99,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "create_project",
       {
+        title: "Create a changelog project",
+        annotations: { title: "Create a changelog project", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         description: "Create a new changelog project. The slug is auto-generated from the name.",
         inputSchema: {
           name: z.string().max(255).describe("Project name"),
@@ -108,6 +116,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_project",
       {
+        title: "Get a changelog project",
+        annotations: { title: "Get a changelog project", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "Get a single changelog project by ID, including public_url (the public changelog page address).",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -122,6 +132,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "update_project",
       {
+        title: "Update a changelog project",
+        annotations: { title: "Update a changelog project", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "Update a changelog project's name or description.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -141,6 +153,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "delete_project",
       {
+        title: "Delete a changelog project",
+        annotations: { title: "Delete a changelog project", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         description: "Permanently delete a changelog project and all its entries.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -157,6 +171,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "list_entries",
       {
+        title: "List changelog entries",
+        annotations: { title: "List changelog entries", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "List changelog entries for a project. Supports pagination.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -177,6 +193,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "create_entry",
       {
+        title: "Create a changelog entry",
+        annotations: { title: "Create a changelog entry", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         description: "Create a new changelog entry for a project.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -208,6 +226,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_entry",
       {
+        title: "Get a changelog entry",
+        annotations: { title: "Get a changelog entry", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "Get a single changelog entry by project and entry ID.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -223,6 +243,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "update_entry",
       {
+        title: "Update a changelog entry",
+        annotations: { title: "Update a changelog entry", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
         description: "Update a changelog entry's title, content, category, or publish status.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -256,6 +278,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "delete_entry",
       {
+        title: "Delete a changelog entry",
+        annotations: { title: "Delete a changelog entry", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
         description: "Permanently delete a changelog entry.",
         inputSchema: {
           project_id: z.number().int().describe("Project ID"),
@@ -273,6 +297,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "list_tokens",
       {
+        title: "List API tokens",
+        annotations: { title: "List API tokens", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description: "List all API tokens for the authenticated user.",
         inputSchema: {},
       },
@@ -285,6 +311,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "create_token",
       {
+        title: "Create an API token",
+        annotations: { title: "Create an API token", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         description: "Create a new API token. The plain-text token is only returned once.",
         inputSchema: {
           name: z.string().describe("A descriptive label for the token"),
@@ -299,6 +327,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "revoke_token",
       {
+        title: "Revoke an API token",
+        annotations: { title: "Revoke an API token", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         description: "Permanently revoke an API token by ID.",
         inputSchema: {
           token_id: z.string().describe("Token ID to revoke (from list_tokens)"),
@@ -315,6 +345,8 @@ export class NitrozenMcpAgent extends McpAgent<Env, never, Props> {
     this.server.registerTool(
       "get_public_entries",
       {
+        title: "Get a public changelog",
+        annotations: { title: "Get a public changelog", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         description:
           "List published changelog entries for a project by its public slug. No authentication required.",
         inputSchema: {
