@@ -404,10 +404,11 @@ async function proxyOAuth(request: Request, path: string): Promise<Response> {
   if (!headers.has("accept")) headers.set("accept", "application/json");
   const ip = request.headers.get("cf-connecting-ip");
   if (ip) headers.set("x-forwarded-for", ip);
+  const body = await request.arrayBuffer();
   const upstream = await fetch(`${UPSTREAM_ORIGIN}${path}`, {
     method: "POST",
     headers,
-    body: await request.arrayBuffer(),
+    body,
     redirect: "manual",
   });
   const out = new Headers();
@@ -416,7 +417,48 @@ async function proxyOAuth(request: Request, path: string): Promise<Response> {
     if (v) out.set(h, v);
   }
   for (const [k, v] of Object.entries(CORS_HEADERS)) out.set(k, v);
+  if (path === "/oauth/register" && upstream.status === 201) {
+    // Echo the granted scope (RFC 7591 section 3.2.1) when nitrozen.io leaves it out
+    const text = await upstream.text();
+    try {
+      const data = JSON.parse(text) as Record<string, unknown>;
+      if (data && typeof data === "object" && !("scope" in data)) {
+        let requested = "";
+        try { requested = String((JSON.parse(new TextDecoder().decode(body)) as { scope?: unknown }).scope ?? ""); } catch { /* not JSON */ }
+        const allowed = ["read", "write", "tokens"];
+        const scopes = requested.split(/\s+/).filter((x) => allowed.includes(x));
+        data.scope = scopes.length ? scopes.join(" ") : "read write";
+        out.set("content-type", "application/json");
+        return new Response(JSON.stringify(data), { status: 201, headers: out });
+      }
+    } catch { /* fall through with the original body */ }
+    return new Response(text, { status: 201, headers: out });
+  }
   return new Response(upstream.body, { status: upstream.status, headers: out });
+}
+
+const ICON_SOURCES: Record<string, { src: string; type: string }> = {
+  "/favicon.ico": { src: `${UPSTREAM_ORIGIN}/nitrozen-logo.png`, type: "image/png" },
+  "/favicon.png": { src: `${UPSTREAM_ORIGIN}/nitrozen-logo.png`, type: "image/png" },
+  "/apple-touch-icon.png": { src: `${UPSTREAM_ORIGIN}/nitrozen-logo.png`, type: "image/png" },
+  "/favicon.svg": { src: `${UPSTREAM_ORIGIN}/favicon.svg`, type: "image/svg+xml" },
+};
+
+/** Serve the Nitrozen icon from nitrozen.io, cached at the edge for a day. */
+async function serveIcon(path: string, ctx: ExecutionContext): Promise<Response> {
+  const { src, type } = ICON_SOURCES[path];
+  const cache = (caches as unknown as { default: Cache }).default;
+  const key = new Request(`https://icon-cache.mcp.nitrozen.io${path}`);
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const upstream = await fetch(src, { cf: { cacheTtl: 86400, cacheEverything: true } } as RequestInit);
+  if (!upstream.ok) return new Response("Not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+  const res = new Response(await upstream.arrayBuffer(), {
+    status: 200,
+    headers: { "Content-Type": type, "Cache-Control": "public, max-age=86400", "Access-Control-Allow-Origin": "*" },
+  });
+  ctx.waitUntil(cache.put(key, res.clone()));
+  return res;
 }
 
 const MCP_RESOURCE = "https://mcp.nitrozen.io/mcp";
@@ -494,6 +536,16 @@ export default {
           "Access-Control-Max-Age": "86400",
         },
       });
+    }
+
+    // Icons (used by clients such as ChatGPT for the app icon)
+    if ((request.method === "GET" || request.method === "HEAD") && url.pathname in ICON_SOURCES) {
+      return serveIcon(url.pathname, ctx);
+    }
+
+    // Root: point people to the MCP docs instead of a 401
+    if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/") {
+      return new Response(null, { status: 302, headers: { Location: "https://nitrozen.io/docs/mcp", "Cache-Control": "public, max-age=3600" } });
     }
 
     // OAuth 2.0 Protected Resource Metadata (RFC 9728), root and path-suffixed forms
